@@ -24,6 +24,7 @@ except ImportError:
     import json
 import os
 import socket
+import sys
 import logging
 
 import certifi
@@ -33,7 +34,11 @@ from urllib3.connection import HTTPConnection
 from telegram import (InputFile, TelegramError)
 from telegram.error import Unauthorized, NetworkError, TimedOut, BadRequest, ChatMigrated
 
-logging.getLogger('urllib3').setLevel(logging.WARNING)
+logger = logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+if sys.version_info < (2, 7, 9):
+    urllib3.disable_warnings()
+    logger.warning('Insecure TLS/SSL detected: upgrade to Python 2.7.9+ to prevent TLS errors')
 
 
 class Request(object):
