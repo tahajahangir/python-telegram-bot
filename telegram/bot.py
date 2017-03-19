@@ -26,9 +26,58 @@ import warnings
 from telegram import (User, Message, Update, Chat, ChatMember, UserProfilePhotos, File,
                       ReplyMarkup, TelegramObject, WebhookInfo, GameHighScore)
 from telegram.error import InvalidToken, TelegramError
+from telegram.utils import promise
 from telegram.utils.request import Request
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
+
+
+def queuedmessage(method):
+    '''A decorator to be used with `telegram.bot.Bot` send* methods.
+
+    Note:
+        As it probably wouldn't be a good idea to make this decorator a
+        property, it had been coded as decorator function, so it implies that
+        **first positional argument to wrapped MUST be self**\.
+
+    The next object attributes are used by decorator:
+
+    Attributes:
+        self._is_messages_queued_default (:obj:`bool`): Value to provide
+            class-defaults to `queued` kwarg if not provided during wrapped
+            method call.
+        self._msg_queue (:obj:`telegram.ext.messagequeue.MessageQueue`):
+            The actual `MessageQueue` used to delay outbond messages according
+            to specified time-limits.
+
+    Wrapped method starts accepting the next kwargs:
+
+    Args:
+        queued (:obj:`bool`, optional): if set to ``True``, the `MessageQueue`
+            is used to process output messages.
+            Defaults to `self._is_queued_out`.
+        isgroup (:obj:`bool`, optional): if set to ``True``, the message is
+            meant to be group-type (as there's no obvious way to determine its
+            type in other way at the moment). Group-type messages could have
+            additional processing delay according to limits set in
+            `self._out_queue`.
+            Defaults to ``False``.
+
+    Returns:
+        Either :obj:`telegram.utils.promise.Promise` in case call is queued,
+        or original method's return value if it's not.
+    '''
+
+    @functools.wraps(method)
+    def wrapped(self, *args, **kwargs):
+        queued = kwargs.pop('queued', self._is_messages_queued_default)
+        isgroup = kwargs.pop('isgroup', False)
+        if queued:
+            prom = promise.Promise(method, (self,) + args, kwargs)
+            return self._msg_queue(prom, isgroup)
+        return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 class Bot(TelegramObject):
@@ -49,7 +98,8 @@ class Bot(TelegramObject):
 
     """
 
-    def __init__(self, token, base_url=None, base_file_url=None, request=None):
+    def __init__(self, token, base_url=None, base_file_url=None, request=None, message_queue=None,
+                 queue_by_default=None):
         self.token = self._validate_token(token)
 
         if base_url is None:
@@ -63,6 +113,8 @@ class Bot(TelegramObject):
         self.bot = None
         self._request = request or Request()
         self.logger = logging.getLogger(__name__)
+        self._msg_queue = message_queue
+        self._is_messages_queued_default = bool(message_queue) if queue_by_default is None else queue_by_default
 
     @property
     def request(self):
@@ -130,7 +182,6 @@ class Bot(TelegramObject):
         return decorator
 
     def message(func):
-
         @functools.wraps(func)
         def decorator(self, *args, **kwargs):
             url, data = func(self, *args, **kwargs)
@@ -182,6 +233,7 @@ class Bot(TelegramObject):
 
         return self.bot
 
+    @queuedmessage
     @log
     @message
     def sendMessage(self,
@@ -239,6 +291,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def forwardMessage(self,
@@ -282,6 +335,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendPhoto(self,
@@ -329,6 +383,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendAudio(self,
@@ -397,6 +452,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendDocument(self,
@@ -449,6 +505,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendSticker(self,
@@ -491,6 +548,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendVideo(self,
@@ -543,6 +601,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendVoice(self,
@@ -598,6 +657,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendLocation(self,
@@ -640,6 +700,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendVenue(self,
@@ -699,6 +760,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendContact(self,
@@ -748,6 +810,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendGame(self,
@@ -791,6 +854,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def sendChatAction(self, chat_id, action, timeout=None, **kwargs):
@@ -1066,6 +1130,7 @@ class Bot(TelegramObject):
 
         return result
 
+    @queuedmessage
     @log
     @message
     def editMessageText(self,
@@ -1125,6 +1190,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def editMessageCaption(self,
@@ -1182,6 +1248,7 @@ class Bot(TelegramObject):
 
         return url, data
 
+    @queuedmessage
     @log
     @message
     def editMessageReplyMarkup(self,
