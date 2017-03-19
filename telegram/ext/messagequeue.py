@@ -109,7 +109,7 @@ class DelayQueue(threading.Thread):
         times = []  # used to store each callable processing time
         while True:
             item = self._queue.get()
-            if self.__exit_req:
+            if item is None and self.__exit_req:
                 return  # shutdown thread
             # delay routine
             now = curtime()
@@ -232,19 +232,19 @@ class MessageQueue(object):
                  autostart=True,
                  threads=10):
         # create accoring delay queues, use composition
-        thread_pool = ThreadPoolExecutor(max_workers=threads)
+        self.thread_pool = ThreadPoolExecutor(max_workers=threads)
         self._all_delayq = DelayQueue(
             burst_limit=all_burst_limit,
             time_limit_ms=all_time_limit_ms,
             exc_route=exc_route,
             autostart=autostart,
-            thread_pool=thread_pool)
+            thread_pool=self.thread_pool)
         self._group_delayq = DelayQueue(
             burst_limit=group_burst_limit,
             time_limit_ms=group_time_limit_ms,
             exc_route=exc_route,
             autostart=autostart,
-            thread_pool=thread_pool)
+            thread_pool=self.thread_pool)
 
     def start(self):
         '''Method is used to manually start the `MessageQueue` processing
@@ -258,6 +258,7 @@ class MessageQueue(object):
     def stop(self, timeout=None):
         self._group_delayq.stop(timeout=timeout)
         self._all_delayq.stop(timeout=timeout)
+        self.thread_pool.shutdown()
 
     stop.__doc__ = DelayQueue.stop.__doc__ or ''  # reuse docsting if any
 
