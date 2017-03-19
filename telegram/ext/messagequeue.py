@@ -20,6 +20,8 @@
 # You should have received a copy of the GNU Lesser Public License
 # along with this program.  If not, see [http://www.gnu.org/licenses/]
 '''A throughput-limiting message processor for Telegram bots'''
+from concurrent.futures import ThreadPoolExecutor
+
 from telegram.utils import promise
 
 import functools
@@ -84,10 +86,12 @@ class DelayQueue(threading.Thread):
                  time_limit_ms=1000,
                  exc_route=None,
                  autostart=True,
-                 name=None):
+                 name=None,
+                 thread_pool=None):
         self._queue = queue if queue is not None else q.Queue()
         self.burst_limit = burst_limit
         self.time_limit = time_limit_ms / 1000
+        self.executor = thread_pool or ThreadPoolExecutor(1)
         self.exc_route = (exc_route if exc_route is not None else self._default_exception_handler)
         self.__exit_req = False  # flag to gently exit thread
         self.__class__._instcnt += 1
@@ -121,11 +125,14 @@ class DelayQueue(threading.Thread):
             if len(times) >= self.burst_limit:  # if throughput limit was hit
                 time.sleep(times[1] - t_delta)
             # finally process one
-            try:
-                func, args, kwargs = item
-                func(*args, **kwargs)
-            except Exception as exc:  # re-route any exceptions
-                self.exc_route(exc)  # to prevent thread exit
+            self.executor.submit(self._process_one, item)
+
+    def _process_one(self, item):
+        try:
+            func, args, kwargs = item
+            func(*args, **kwargs)
+        except Exception as exc:  # re-route any exceptions
+            self.exc_route(exc)  # to prevent thread exit
 
     def stop(self, timeout=None):
         '''Used to gently stop processor and shutdown its thread.
@@ -222,18 +229,22 @@ class MessageQueue(object):
                  group_burst_limit=20,
                  group_time_limit_ms=60000,
                  exc_route=None,
-                 autostart=True):
+                 autostart=True,
+                 threads=10):
         # create accoring delay queues, use composition
+        thread_pool = ThreadPoolExecutor(max_workers=threads)
         self._all_delayq = DelayQueue(
             burst_limit=all_burst_limit,
             time_limit_ms=all_time_limit_ms,
             exc_route=exc_route,
-            autostart=autostart)
+            autostart=autostart,
+            thread_pool=thread_pool)
         self._group_delayq = DelayQueue(
             burst_limit=group_burst_limit,
             time_limit_ms=group_time_limit_ms,
             exc_route=exc_route,
-            autostart=autostart)
+            autostart=autostart,
+            thread_pool=thread_pool)
 
     def start(self):
         '''Method is used to manually start the `MessageQueue` processing
