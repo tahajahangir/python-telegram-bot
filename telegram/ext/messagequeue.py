@@ -22,6 +22,8 @@
 '''A throughput-limiting message processor for Telegram bots'''
 from concurrent.futures import ThreadPoolExecutor
 
+import logging
+
 from telegram.utils import promise
 
 import functools
@@ -48,6 +50,9 @@ else:
 class DelayQueueError(RuntimeError):
     '''Indicates processing errors'''
     pass
+
+
+logger = logging.getLogger(__name__)
 
 
 class DelayQueue(threading.Thread):
@@ -95,6 +100,8 @@ class DelayQueue(threading.Thread):
         self.exc_route = (exc_route if exc_route is not None else self._default_exception_handler)
         self.__exit_req = False  # flag to gently exit thread
         self.__class__._instcnt += 1
+        self._in_queue = self._running = self._ran = 0
+        self._counter_lock = threading.Lock()
         if name is None:
             name = '%s-%s' % (self.__class__.__name__, self.__class__._instcnt)
         super(DelayQueue, self).__init__(name=name)
@@ -125,14 +132,28 @@ class DelayQueue(threading.Thread):
             if len(times) >= self.burst_limit:  # if throughput limit was hit
                 time.sleep(times[1] - t_delta)
             # finally process one
-            self.executor.submit(self._process_one, item)
+            logging.info('Ran: {}, Running: {}, In-Queue: {}'.format(self._ran, self._running, self._in_queue))
+            with self._counter_lock:
+                self._in_queue += 1
+            future = self.executor.submit(self._process_one, item)
+            future.add_done_callback(self._callback)
+
+    def _callback(self, futurue):
+        with self._counter_lock:
+            self._in_queue -= 1
 
     def _process_one(self, item):
+        with self._counter_lock:
+            self._running += 1
+            self._ran += 1
         try:
             func, args, kwargs = item
             func(*args, **kwargs)
         except Exception as exc:  # re-route any exceptions
             self.exc_route(exc)  # to prevent thread exit
+        finally:
+            with self._counter_lock:
+                self._running -= 1
 
     def stop(self, timeout=None):
         '''Used to gently stop processor and shutdown its thread.
