@@ -138,9 +138,13 @@ class DelayQueue(threading.Thread):
             future = self.executor.submit(self._process_one, item)
             future.add_done_callback(self._callback)
 
-    def _callback(self, futurue):
+    def _callback(self, future):
         with self._counter_lock:
             self._in_queue -= 1
+        try:
+            future.result()
+        except Exception:
+            logging.exception('Error occurred in queued task')
 
     def _process_one(self, item):
         with self._counter_lock:
